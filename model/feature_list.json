@@ -1,0 +1,18 @@
+[
+  "rain",
+  "temperature",
+  "hour",
+  "weekday",
+  "capacity",
+  "latitude",
+  "longitude",
+  "month",
+  "is_weekend",
+  "lag_1h",
+  "lag_24h",
+  "lag_168h",
+  "rolling_mean_3h",
+  "rolling_std_3h",
+  "rolling_mean_24h",
+  "rolling_std_24h"
+]
