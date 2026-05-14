@@ -1,0 +1,179 @@
+
+MASTERARBEIT – TECHNISCHE GESAMTDOKUMENTATION
+Datenpipeline, Datenfusion und Feature Engineering für Lkw-Parkplatz-Auslastungsanalyse und Prognose (Juni 2025)
+--------------------------------------------------------------------------------------------
+
+INHALTSVERZEICHNIS
+1. Einführung und Zielsetzung der Datenpipeline
+2. Überblick über alle verwendeten Datensätze
+3. Erstellung der Grunddatenstruktur
+4. Ermittlung nächstgelegener Wetterstation pro Parkareal
+5. Verknüpfung von Occupancy und Wetterdaten
+6. Extraktion statischer Standortattribute
+7. Erstellung des ML-Datasets (Feature Engineering)
+8. Erstellte Dateien: vollständige Liste + Inhalt + Zweck
+9. Pipeline-Diagramm
+10. Wissenschaftliche Bewertung der Datenqualität
+11. Hinweise zur Weiterverwendung
+
+--------------------------------------------------------------------------------------------
+1. EINFÜHRUNG UND ZIELSETZUNG DER DATENPIPELINE
+
+Die Datenpipeline wurde entwickelt, um die buchungsbasierte Auslastung von Lkw-Parkplätzen in stündlicher Auflösung zu rekonstruieren und mit Wetterdaten sowie Standortmerkmalen zu verknüpfen. Ziel ist die Erstellung eines vollständigen ML-Datasets zur Prognose von Parkplatzbelegung, Standortanalyse und datengetriebenen Optimierungsentscheidungen.
+
+--------------------------------------------------------------------------------------------
+2. ÜBERBLICK ÜBER ALLE VERWENDETEN DATENSÄTZE
+
+2.1 Orders (Reservierungsdaten) – "orders total bereinigt.xlsx"
+Enthält:
+- Parkareal-ID, Einfahrts- und Ausfahrtszeiten
+- Erstellungsdatum (Booking Time)
+- B2B/B2C, Status, Nettobetrag, Kundengruppe, Produkt
+
+2.2 Parkplatzkoordinaten – "parken_koords.xlsx"
+Enthält:
+- Address, City, Latitude, Longitude
+- Über 80 Featureflags: Kamera, WC, Dusche, 24/7, Restaurant, Charging, CCTV etc.
+
+2.3 Parkplatzmetadaten – "parkingareas_June.xlsx"
+Zusätzliche Standortattribute, Orientierung für Merge-Prozesse.
+
+2.4 Wetterdaten (DWD) – "DWD_hourly_recent_JuneMonth2025_filtered.xlsx"
+Sheets:
+- Messungen: Regen, Temperatur, Feuchte, Wind, Sonnenschein, Wolken
+- Stationen: ID + Koordinaten
+
+--------------------------------------------------------------------------------------------
+3. ERSTELLUNG DER GRUNDDATENSTRUKTUR
+
+3.1 Merge Orders + Koordinaten → "orders_full_merged.xlsx"
+Über Schlüssel:
+merge_key = lower(Address) + "_" + lower(City)
+Zweck:
+Vereinigung aller Event-Daten mit allen Standortattributen.
+
+3.2 Erstellung der stündlichen Occupancy-Tabelle
+- Parsing der Buchungszeiten
+- Floor to hour
+- Delta-Verfahren:
+  +1 bei start_hour
+  -1 bei end_hour
+- Kumulative Belegung (Cumsum)
+- Vollständiges Stundenraster erzeugt (30 Tage × 24 Stunden × alle Areale)
+- Kapazität = max occupancy im Monat
+- occupancy_ratio = occupancy / capacity
+
+Ausgabe:
+"occupancy_hourly_june.csv"
+
+--------------------------------------------------------------------------------------------
+4. ERMITTLUNG NÄCHSTGELEGENER WETTERSTATION PRO PARKAREAL
+
+Haversine-Distanz zwischen:
+- Areal-Koordinaten
+- DWD-Stationen
+
+Ergebnis:
+"area_to_station_mapping.csv"
+
+--------------------------------------------------------------------------------------------
+5. VERKNÜPFUNG VON OCCUPANCY UND WETTER
+
+- Merge occupancy + stations_id
+- Filter Wetter auf Juni
+- Merge ON stations_id AND timestamp
+
+Ergebnis:
+"occupancy_weather_hourly_june_final.csv"
+Stündliche Belegung + Wetterattribute.
+
+--------------------------------------------------------------------------------------------
+6. EXTRAKTION STATISCHER STANDORTATTRIBUTE
+
+Aus "orders_full_merged.xlsx":
+- alle Felder, die sich nicht pro Event ändern
+- Standortattribute, Featureflags, Provider, Koordinaten.
+
+Ergebnis:
+"parking_static_features.csv"
+
+--------------------------------------------------------------------------------------------
+7. ERSTELLUNG DES ML-DATASETS (FEATURE ENGINEERING)
+
+Ausgang:
+- occupancy_weather_hourly_june_final.csv
+- parking_static_features.csv
+
+Features:
+7.1 Zeitmerkmale:
+- hour, day_of_week, is_weekend, date, is_holiday
+
+7.2 Wettermerkmale:
+- is_rain
+- rain_intensity_class (0–3)
+- temp_class (kalt/mild/heiß)
+
+7.3 Lag-Features:
+- lag_1h, lag_2h, lag_6h, lag_24h
+
+7.4 Rolling-Window-Features:
+- roll_mean_3h, roll_mean_6h, roll_mean_12h
+
+Ergebnis:
+"ml_dataset_june_2025.csv"
+
+--------------------------------------------------------------------------------------------
+8. ERSTELLTE DATEIEN – ÜBERBLICK
+
+1. orders_full_merged.xlsx – Master-Event-Tabelle
+2. area_to_station_mapping.csv – Zuordnung Areal → Wetterstation
+3. occupancy_hourly_june.csv – Zwischenprodukt der Belegung
+4. occupancy_weather_hourly_june_final.csv – Zeitreihe + Wetter
+5. parking_static_features.csv – Statische Standortattribute
+6. ml_dataset_june_2025.csv – Vollständiges ML-Dataset
+7. area_level_summary.csv – Diagnose der Auslastung pro Areal
+8. masterarbeit_datenpipeline_dokumentation.txt – Diese Dokumentation
+
+--------------------------------------------------------------------------------------------
+9. PIPELINE-DIAGRAMM (TEXTFORM)
+
+Orders ---+
+          |--- merge_on_address → orders_full_merged
+Koords ---+
+
+orders_full_merged → extract lat/lon → match_weather_station → area_to_station_mapping
+
+orders_full_merged → build_hourly_occupancy → occupancy_hourly_june
+
+occupancy_hourly_june ---+
+                         |--- merge station → merge weather → occupancy_weather_hourly_june_final
+weather_hourly_june -----+
+
+parking_static_features ----+
+                            |
+occupancy_weather_hourly_june_final --- merge static → ML Data
+                                        |
+                                        → Feature Engineering → ml_dataset_june_2025
+
+ml_dataset_june_2025 → area_level_summary
+
+--------------------------------------------------------------------------------------------
+10. WISSENSCHAFTLICHE BEWERTUNG DER DATENQUALITÄT
+
+- Buchungsdaten lückenhaft → robust durch Delta-Verfahren.
+- Wetterdaten enthalten Missing-Werte (-999) → neutralisiert zu NaN.
+- Standortattribute redundant → dedupliziert.
+- Stündliche Zeitreihe vollständig und korrekt.
+- Mapping wetterstationen basierend auf Distanz → stabil und wissenschaftlich üblich.
+- ML-Dataset enthält alle relevanten Features für Prognosen.
+
+--------------------------------------------------------------------------------------------
+11. WEITERVERWENDUNG
+
+Mit ml_dataset_june_2025.csv können folgende Analysen durchgeführt werden:
+
+- Forecasting (XGBoost, CatBoost, LSTM, Prophet)
+- Feature Importance
+- Standort-Clustering
+- Preis- und Nachfrageanalyse
+- Strategische Standortplanung
